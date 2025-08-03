@@ -1,0 +1,125 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local HumanoidRoot = nil
+local FlyConnection = nil
+local Velocity = Vector3.new()
+
+workspace.Changed:Connect(function()
+    Camera = workspace.CurrentCamera
+end)
+
+local function SetupCharacter(char)
+    Character = char
+    HumanoidRoot = char:WaitForChild("HumanoidRootPart")
+end
+
+LocalPlayer.CharacterAdded:Connect(SetupCharacter)
+if LocalPlayer.Character then
+    SetupCharacter(LocalPlayer.Character)
+end
+
+local function isnetworkowner(part)
+    return true -- Replace with your executor's actual check
+end
+
+local function GetClosestVehicle()
+    local closest, distance = nil, math.huge
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v.Name == "WorldModel" and v:IsA("Model") then
+            local dist = (v:GetPivot().Position - (HumanoidRoot and HumanoidRoot.Position or Vector3.new())).Magnitude
+            if dist < distance then
+                closest = v
+                distance = dist
+            end
+        end
+    end
+    return closest
+end
+
+local function CleanupVehicle(vehicle)
+    local partsToDestroy = {
+        "Animation","AntiRoll","AntiRollBars","AntiTeleport",
+        "Burnout","Engine","Redress","Remotes","Steering",
+        "Suspension","Wheels"
+    }
+    for _, name in ipairs(partsToDestroy) do
+        local part = vehicle:FindFirstChild(name)
+        if part then part:Destroy() end
+    end
+    local scripts = vehicle:FindFirstChild("Scripts")
+    if scripts then
+        for _, n in ipairs({"lerp","Units","Controller","Constants","Server","Plugins","Client"}) do
+            local sub = scripts:FindFirstChild(n)
+            if sub then sub:Destroy() end
+        end
+    end
+end
+
+local function FlyStep(dt)
+    local move = Vector3.new()
+    if not UserInputService:GetFocusedTextBox() then
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+            move += Camera.CFrame.LookVector * 105
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+            move -= Camera.CFrame.LookVector * 105
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            move -= Camera.CFrame.RightVector * 105
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            move += Camera.CFrame.RightVector * 105
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            move += Camera.CFrame.UpVector * 105
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+            move *= 3
+        end
+    end
+
+    if HumanoidRoot then
+        local root = HumanoidRoot
+        if root.Anchored then return end
+        if not isnetworkowner(root) then return end
+
+        Velocity = Velocity:Lerp(move, math.clamp(dt * 4, 0, 1))
+        root.Velocity = Velocity + Vector3.new(0, -2, 0)
+        root.RotVelocity = Vector3.new(0, 0, 0)
+        root.CFrame = root.CFrame:Lerp(CFrame.lookAt(root.Position, root.Position + Velocity + Camera.CFrame.LookVector), math.clamp(dt * 16, 0, 1))
+    end
+end
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.B then
+        if FlyConnection then
+            FlyConnection:Disconnect()
+            FlyConnection = nil
+            StarterGui:SetCore("SendNotification", {
+                Title = "Car Fly OFF",
+                Text = "Fly Disabled!"
+            })
+        else
+            Velocity = HumanoidRoot and HumanoidRoot.Velocity or Vector3.new()
+            FlyConnection = RunService.Heartbeat:Connect(FlyStep)
+            CleanupVehicle(GetClosestVehicle())
+            StarterGui:SetCore("SendNotification", {
+                Title = "Car Fly ON",
+                Text = "Fly Enabled!"
+            })
+        end
+    end
+end)
+
+StarterGui:SetCore("SendNotification", {
+    Title = "Car Fly Loaded",
+    Text = "B to Onn/Off!"
+})
